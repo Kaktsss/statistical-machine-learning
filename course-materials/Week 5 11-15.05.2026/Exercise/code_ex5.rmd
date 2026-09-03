@@ -1,0 +1,429 @@
+---
+title: "Statistical and Machine Learning SS26"
+author: "Solution Exercise Sheet 5"
+output: pdf_document
+output_dir: "/Users/Mara_1/Seafile/Statistical and Machine Learning/Exercises/Week 5 - Kernel methods/Prep"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = getwd())
+```
+
+
+# 1)
+
+a) Load and inspect the dataset "Melbourne House Prices".
+
+```{r load}
+melbdata <- read.csv("./Melbourne_housing_FULL.csv", header = TRUE) #load data
+str(melbdata) #overview: nunber of obs&var, names of var
+```
+
+b) Plot the histogram of the distance from the city center as frequency and as density.
+
+```{r} 
+hist(na.omit(melbdata$Distance), main = "Distance to CBD", xlab = "Distance (km)") 
+#na.omit removes missing values; default: freq=TRUE -> frequency; label plot; label x-axis
+
+hist(na.omit(melbdata$Distance), breaks = 30,
+     main = "Distance to CBD", xlab = "Distance (km)" )
+# uses more bins -> histogram becomes more detailed 
+
+hist(na.omit(melbdata$Distance), breaks = 30, freq = FALSE, 
+     main = "Distance to CBD", xlab = "Distance (km)") 
+#freq_FALSE -> density, area of all bars adds up to 1
+```
+
+c) Estimate the density of the Distance variable using four different kernel functions: Gaussian, Epanechnikov, Triangular, and Biweight. Use a fixed bandwidth of bw = 1 for all kernels. Plot the histogram of Distance as a density (breaks = 50). Overlay all four KDE curves on the histogram in different colors.
+
+```{r}
+d1 <- density(na.omit(melbdata$Distance), bw = 1, kernel = "gaussian") 
+d2 <- density(na.omit(melbdata$Distance), bw = 1, kernel = "epanechnikov") 
+d3 <- density(na.omit(melbdata$Distance), bw = 1, kernel = "triangular") 
+d4 <- density(na.omit(melbdata$Distance), bw = 1, kernel = "biweight") 
+#Each line estimates a smooth density curve from the same data, using a different kernel 
+# shape but the same bandwidth bw = 1. 
+# x axis: distance from city center; y axis:  the estimated density at each point
+
+#Density at a point tells you how concentrated the data is there (not a probability!) it only 
+# becomes an actual probability when computing the area under the curve over an interval.
+
+#putting together histogram and 4 density curves
+hist(na.omit(melbdata$Distance), freq = FALSE, breaks = 50, 
+     main = "Effect of kernel function", xlab = "Distance to CBD (km)")
+lines(d1$x, d1$y, col = "red") #takes x and y values of d1 (gaussian) and plots the curve
+lines(d2$x, d2$y, col = "green2") 
+lines(d3$x, d3$y, col = "purple") 
+lines(d4$x, d4$y, col = "blue3") 
+legend("topright",c("Gaussian","Epanechnikov", "Triangular", "Biweight"),
+      lty = c(1, 1, 1, 1), col = c("red", "green2", "purple", "blue3"))
+```
+
+All four different kernel density curves look very similar!
+
+d) Refit and plot the KDE using only the Gaussian kernel with three different bandwidths: bw = 0.5, bw = 1, and bw = 1.5.  
+
+```{r} 
+# only use gaussian kernel, differenet bandwidths 
+d1 <- density(na.omit(melbdata$Distance), bw = 0.5, kernel = "gaussian") 
+d2 <- density(na.omit(melbdata$Distance), bw = 1, kernel = "gaussian") 
+d3 <- density(na.omit(melbdata$Distance), bw = 1.5, kernel = "gaussian") 
+
+hist(na.omit(melbdata$Distance), freq = FALSE, breaks = 50, main = "Effect of bandwidth", 
+     xlab = "Distance (km)")
+lines(d1$x, d1$y, col = "red") 
+lines(d2$x, d2$y, col = "green2") 
+lines(d3$x, d3$y, col = "purple") 
+legend("topright",c("bw=0.5", "bw=1", "bw=1.5"),
+      lty=c(1,1,1,1), col=c("red", "green2", "purple"))
+```
+
+e) Use the density estimation to estimate the probability of finding a house for sale between 8 and 10km from the CBD
+
+```{r} 
+bw <- bw.bcv(na.omit(melbdata$Distance), lower = 0.01, upper = 10) 
+# Instead of manually picking bw = 1 like before, bw.bcv() automatically finds 
+# the optimal bandwidth using Biased Cross-Validation.
+# it searches between 0.01 and 10 and picks the value that minimizes the estimation error.
+
+d2 <- density(na.omit(melbdata$Distance), bw = bw, kernel = "gaussian") 
+# computes KDE using optimal bandwidth we just calculated
+f <- approxfun(d2) 
+#d2 is just a table of values, approxfun turns these values into a function that 
+# we can call at any x value in the range and gives the estimated density at x km
+
+#each of the following methods compute the same thing: 
+# the probability of finding a house for sale between 8 and 10km from the CBD
+p <- integrate(f, 8, 10); p
+#Directly integrates the function f between 8 and 10.
+
+ind = which((d2$x>8)&(d2$x<10))
+mean(d2$y[ind])*(10-8)
+# Finds all grid points between 8 and 10, takes their average density, 
+# multiplies by the interval width
+
+mean(f(seq(8, 10, length.out = 100)))*(10-8)
+#Creates 100 evenly spaced points between 8 and 10, evaluates f at each, 
+# takes the average and multiplies by interval width. 
+# (More precise than Method 2 because it uses more points.)
+
+
+plot(d2, main = "Density estimation")
+abline(v=8, col = "red")
+abline(v=10, col = "red")
+bw
+```
+
+
+# 2)
+
+a) Load and inspect the data
+
+```{r}
+library(ISLR2) #load packages
+library(caret)
+data("Caravan")
+attach(Caravan) #if we attach the data set, we don't have to write caravan$variable anymore
+
+str(Caravan)
+summary(Purchase)
+348 / 5822 # only 6% purchased a caravan insurance!
+```
+
+
+```{r}
+standardized.X <- scale(Caravan[, -86]) #transforms every variable to have mean 0; sd 1. 
+# caravan data set, every row, every column BUT the 86th one (Purchase)
+
+#by runnning the following two lines, we can see that the scales of two randomly 
+# chosen variables are very different!
+var(Caravan[, 1]) 
+var(Caravan[, 2])
+
+var(standardized.X[, 1]) #variance 1
+mean(standardized.X[, 1]) #mean approx. zero
+var(standardized.X[, 2])
+# Every column of standardized.X has a standard deviation of one and a mean of zero.
+```
+
+Now we build the KNN model.
+
+```{r}
+# Split the observations into a test set and a training set
+test <- 1:1000 # create a vector of row indices
+train.X <- standardized.X[-test,] #takes all rows exept test rows (from standardized data)
+test.X <- standardized.X[test,] #takes all test rows (1-1000)
+train.Y <- Purchase[-test] #same thing for Y (standardized.X doesnt contain Purchase)
+test.Y <- Purchase[test]
+
+set.seed(123)
+
+knn.fit <- knn3(x = train.X, train.Y, k = 1)
+# Fits the KNN model on the training data
+# x = train.X :  predictor matrix the model learns from
+# train.Y : the true labels (Yes/No) for each training row
+# k = 1 : use only the 1 nearest neighbor to make predictions
+# -> for every new test point the model looks at the single closest 
+# training point and assigns its label
+# eg new customer -> Find the 1 closest person in training data 
+# -> That person said "No" -> Predict "No"
+# -> no real computation! It simply memorizes the entire training set
+
+knn.pred <- predict(knn.fit, test.X, type = "class")
+# predicts the class for each of the 1000 test observations 
+# knn.fit: trained model
+# test.X: 1000 test observations to predict
+# type = class: returns predicted class label, rather than probabilities
+
+# Evaluate its performance on the test data
+mean(test.Y != knn.pred)  # computes the overall error rate of the KNN model on the test data
+# true value/predicted value same or different? -> compute erreor rate 
+# (number of wrong predictions/total predictions)
+# Error rate on the test data is under 12 %
+
+mean(test.Y != "No")
+# only 6 % of customers purchased insurance, we could get the error rate down to 
+# 6 % by always predicting No regardless of the values of the predictors!
+# prediction error in naive model is lower than in KNN model 
+```
+
+
+
+```{r}
+table(knn.pred , test.Y) # confusion matrix: rows predicted, columns actual values
+10 / (68 + 10) 
+# precision among predicted buyers: out of 78 predicted buyers, 10 will actually buy (12.8%)
+```
+
+```{r}
+# Using K =3
+knn.fit_K3 <- knn3(train.X, train.Y, k = 3) # same procedure but with k=3!
+#For every test point, look at the 3 closest neighbors and take a majority vote
+knn.predict_K3 <- predict(knn.fit_K3, test.X, type = "class")
+table(knn.predict_K3 , test.Y)
+#KNN is now more conservative -> predicts Yes much less often
+5 / (5 + 19)
+# but prediction quality improves: success rate increases to 21 %
+
+# K = 5
+knn.fit_K5 <- knn3(train.X, train.Y, k = 5) #k=5
+knn.predict_K5 <- predict(knn.fit_K5, test.X, type = "class")
+table(knn.predict_K5 , test.Y)
+# as K increases, fewer people get flagged as buyers, higher precision among those flagged
+4 / 15
+# rate is 26.7 %
+
+```
+
+KNN: \
+1. Standardize \
+2. Overall accuracy is misleading for imbalanced data \
+3. Confusion matrix & precision \
+4. K tradeoff: Higher K = fewer but better predictions \
+
+
+
+# 3)
+
+Fit a Gaussian Process (GP) regression model to simulated data using the `gausspr()` function from the `kernlab` package
+and interpret the posterior mean and uncertainty.
+
+What's a GP? 
+-> A distribution over functions. Instead of predicting a single value like linear regression, it predicts 
+1) A mean: the best guess at each point
+2) An uncertainty: how confident it is at each point
+-> plot: line with confidence band around it 
+
+Run the following code to generate the data.
+
+```{r}
+library(kernlab)
+library(ggplot2)
+
+set.seed(42)
+f_true  <- function(x) sin(2 * pi * x) + 0.5 * sin(4 * pi * x) #true underlying function
+n       <- 40
+x_train <- sort(runif(n, 0, 1)) # 40 random x values between 0 and 1
+y_train <- f_true(x_train) + rnorm(n, sd = 0.3) #true function values plus random noise
+x_grid  <- seq(0, 1, length.out = 300) 
+#grid of 300 points between 0 and 1 on which GP will make predictions on
+```
+
+a) Fit and plot the GP posterior mean
+
+Fit a GP regression model using `gausspr()` with a squared-exponential (RBF) kernel (`kernel = "rbfdot"`), `sigma = 5`, and `var = 0.09`.
+Predict on `x_grid` and plot the training data together with the posterior mean and the true function (dashed line).
+
+```{r}
+gp_fit <- gausspr(x_train, y_train, kernel = "rbfdot",
+                  kpar = list(sigma = 5), var = 0.09)
+# fits GP regression model. training data 
+# (input(what we know)/output(what we want to predict))
+# specify kernel function (gaussian; default choice)
+# we look at kpar and var in c and d
+# gp_fit then stores the fitted GP model
+
+y_pred   <- predict(gp_fit, x_grid)
+# uses the trained GP model to predict the posterior mean at every point in x_grid
+# for every point in x_grid, the GP gives its best guess for y
+# all values are stored in y
+
+df_train <- data.frame(x = x_train, y = y_train) 
+# combines x and y training data into data frame
+df_grid  <- data.frame(x = x_grid, y_pred = as.vector(y_pred)) 
+# data frame with x grid points and predicted values of y
+
+ggplot() +
+  geom_point(data = df_train, aes(x, y),
+             colour = "steelblue", size = 2, alpha = 0.8) +
+  geom_line(data = df_grid, aes(x, y_pred),
+            colour = "firebrick", linewidth = 1) +
+  geom_line(aes(x = x_grid, y = f_true(x_grid)),
+            linetype = "dashed", colour = "grey40") +
+  labs(title = "GP posterior mean (red) vs. true function (dashed)",
+       x = "x", y = "y") +
+  theme_minimal()
+
+```
+
+
+
+b) Obtain and plot posterior uncertainty
+
+Refit the GP with `variance.model = TRUE`. Use `predict(..., type = "sdeviation")` to extract posterior standard
+deviations and add $\pm 1.96$ credible bands to your plot.
+Where is uncertainty largest, and why?
+
+```{r}
+gp_var <- gausspr(x_train, y_train, kernel = "rbfdot",
+                  kpar = list(sigma = 5), var = 0.09,
+                  variance.model = TRUE) 
+#same code as in a) but it tells the GP to also track and return uncertainty 
+# at each point, not just the mean
+
+y_mean <- as.vector(predict(gp_var, x_grid)) 
+#extracts posterior mean 
+
+y_sd   <- as.vector(predict(gp_var, x_grid, type = "sdeviation")) 
+# extracts posterior standard deviation at each grid point - how uncertain GP is
+
+df_band <- data.frame( # computes data frame with:
+  x  = x_grid, # x grid points
+  mu = y_mean,  # their respective predicted mean
+  lo = y_mean - 1.96 * y_sd, #  lower bound of band = mean - 1.96 × sd
+  hi = y_mean + 1.96 * y_sd # upper bound of band = mean + 1.96 × sd
+)
+
+ggplot() +
+  geom_ribbon(data = df_band, aes(x = x, ymin = lo, ymax = hi),
+              fill = "firebrick", alpha = 0.2) +
+  geom_line(data = df_band, aes(x = x, y = mu),
+            colour = "firebrick", linewidth = 1) +
+  geom_point(data = df_train, aes(x, y),
+             colour = "steelblue", size = 2, alpha = 0.8) +
+  labs(title = "GP posterior mean with 95% credible band",
+       x = "x", y = "y") +
+  theme_minimal()
+```
+
+The shaded band shows $\hat\mu(x) \pm 1.96\,\hat\sigma(x)$. \
+---
+
+c) Effect of the length-scale hyperparameter
+
+Refit the GP with `sigma = 1` and `sigma = 50` (keeping `var = 0.09`).
+Plot both posterior means together with the data and the true function.
+Describe the effect of `sigma` on the fit.
+
+```{r}
+gp_s1  <- gausspr(x_train, y_train, kernel = "rbfdot",
+                  kpar = list(sigma = 1),  var = 0.09)
+gp_s50 <- gausspr(x_train, y_train, kernel = "rbfdot",
+                  kpar = list(sigma = 50), var = 0.09)
+
+df_comp <- data.frame(
+  x       = x_grid,
+  sigma1  = as.vector(predict(gp_s1,  x_grid)),
+  sigma50 = as.vector(predict(gp_s50, x_grid))
+)
+
+ggplot() +
+  geom_point(data = df_train, aes(x, y),
+             colour = "steelblue", size = 2, alpha = 0.7) +
+  geom_line(data = df_comp,
+            aes(x, sigma1, colour = "sigma = 1"),  linewidth = 1) +
+  geom_line(data = df_comp,
+            aes(x, sigma50, colour = "sigma = 50"), linewidth = 1) +
+  geom_line(aes(x = x_grid, y = f_true(x_grid)),
+            linetype = "dashed", colour = "grey40") +
+  scale_colour_manual(values = c("sigma = 1"  = "orange",
+                                 "sigma = 50" = "purple")) +
+  labs(title = "Effect of length-scale on GP fit",
+       colour = "Kernel", x = "x", y = "y") +
+  theme_minimal()
+```
+
+---
+
+d) Effect of the noise variance
+
+Using `sigma = 5`, refit the GP with `var = 0.001` and `var = 2`.
+Plot the two posterior means. What does the noise variance parameter
+control, and how does changing it affect the fit?
+
+```{r}
+gp_v001 <- gausspr(x_train, y_train, kernel = "rbfdot",
+                   kpar = list(sigma = 5), var = 0.001)
+gp_v2   <- gausspr(x_train, y_train, kernel = "rbfdot",
+                   kpar = list(sigma = 5), var = 2)
+
+df_noise <- data.frame(
+  x    = x_grid,
+  v001 = as.vector(predict(gp_v001, x_grid)),
+  v2   = as.vector(predict(gp_v2,   x_grid))
+)
+
+ggplot() +
+  geom_point(data = df_train, aes(x, y),
+             colour = "steelblue", size = 2, alpha = 0.7) +
+  geom_line(data = df_noise,
+            aes(x, v001, colour = "var = 0.001"), linewidth = 1) +
+  geom_line(data = df_noise,
+            aes(x, v2,   colour = "var = 2"),     linewidth = 1) +
+  scale_colour_manual(values = c("var = 0.001" = "darkgreen",
+                                 "var = 2"     = "darkorange")) +
+  labs(title = "Effect of noise variance on GP fit",
+       colour = "Noise variance", x = "x", y = "y") +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
